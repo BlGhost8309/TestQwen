@@ -1,80 +1,80 @@
-# Test file
 import subprocess
-import time
-import statistics
-
-# Список известных поисковых систем для пинга
-search_engines = [
-    "google.com",
-    "bing.com",
-    "yahoo.com",
-    "duckduckgo.com",
-    "yandex.com"
-]
+import platform
+import re
+import sys
 
 def ping_host(host, duration=10):
-    """Пингует хост в течение указанного времени и возвращает список времен ответа."""
-    times = []
-    start_time = time.time()
-    
+    """
+    Пингует хост в течение заданного времени.
+    Возвращает кортеж: (успех, среднее_время, количество_ответов)
+    """
+    system = platform.system()
     try:
-        # Запускаем ping с интервалом 1 секунду
-        process = subprocess.Popen(
-            ["ping", "-c", "1000", "-i", "1", host],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        end_time = start_time + duration
-        
-        while time.time() < end_time:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
+        if system == "Windows":
+            # На Windows: -n количество пакетов, -w таймаут в мс
+            # Пингуем 10 раз с таймаутом 1 секунду (имитация 10 секунд)
+            cmd = ["ping", "-n", str(duration), "-w", "1000", host]
+            # Кодировка cp866 для русской версии Windows
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=duration + 5)
+            output_str = output.decode('cp866', errors='ignore')
             
-            # Парсим время ответа из строки ping
-            if "time=" in line:
-                try:
-                    # Извлекаем значение времени (например, time=12.3 ms)
-                    time_part = line.split("time=")[1].split()[0]
-                    ping_time = float(time_part.replace("ms", ""))
-                    times.append(ping_time)
-                except (ValueError, IndexError):
-                    continue
-        
-        process.terminate()
-        process.wait()
-        
+            # Ищем время ответа в русском формате: "время=25мс" или "время<1мс"
+            times = re.findall(r'время[=<](\d+)мс', output_str)
+            # Дублирующая проверка для английского формата (на случай англ. винды)
+            if not times:
+                times = re.findall(r'time[=<](\d+)ms', output_str)
+                
+        else:
+            # Linux/Mac: -c количество, -W таймаут в секундах
+            cmd = ["ping", "-c", str(duration), "-W", "1", host]
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=duration + 5)
+            output_str = output.decode('utf-8', errors='ignore')
+            times = re.findall(r'time[=<](\d+\.?\d*)\s*ms', output_str)
+
+        if times:
+            float_times = [float(t) for t in times]
+            avg_time = sum(float_times) / len(float_times)
+            return True, avg_time, len(times)
+        else:
+            return False, 0, 0
+
+    except subprocess.CalledProcessError:
+        return False, 0, 0
     except Exception as e:
         print(f"Ошибка при пинге {host}: {e}")
-    
-    return times
+        return False, 0, 0
 
 def main():
-    all_times = []
+    # 5 известных поисковых систем
+    hosts = ["google.com", "bing.com", "yahoo.com", "duckduckgo.com", "yandex.com"]
+    duration = 10
     
-    print("Начинаем пинговать 5 поисковых систем в течение 10 секунд каждая...")
+    print(f"Начинаем пинговать 5 поисковых систем в течение {duration} секунд каждая...")
     print("-" * 60)
     
-    for engine in search_engines:
-        print(f"\nПингуем {engine}...")
-        times = ping_host(engine, duration=10)
-        
-        if times:
-            avg_time = statistics.mean(times)
-            print(f"  {engine}: получено {len(times)} ответов, среднее время: {avg_time:.2f} ms")
-            all_times.extend(times)
-        else:
-            print(f"  {engine}: нет данных о времени ответа")
+    results = {}
     
+    for host in hosts:
+        print(f"\nПингуем {host}...")
+        success, avg, count = ping_host(host, duration)
+        
+        if success and count > 0:
+            print(f"  {host}: получено {count} ответов, среднее время: {avg:.2f} мс")
+            results[host] = avg
+        else:
+            print(f"  {host}: нет данных о времени ответа (хост недоступен или блокирует ICMP)")
+            results[host] = None
+
     print("\n" + "=" * 60)
     
-    if all_times:
-        overall_avg = statistics.mean(all_times)
-        print(f"Общая средняя скорость пинга по всем поисковым системам: {overall_avg:.2f} ms")
+    valid_results = [v for v in results.values() if v is not None]
+    
+    if valid_results:
+        overall_avg = sum(valid_results) / len(valid_results)
+        print(f"Общая средняя скорость по доступным хостам: {overall_avg:.2f} мс")
     else:
-        print("Не удалось получить данные о скорости пинга")
+        print("Не удалось получить данные о скорости пинга ни от одного хоста.")
+        print("Возможно, отсутствует интернет или блокируются ICMP-запросы фаерволом.")
 
 if __name__ == "__main__":
     main()
